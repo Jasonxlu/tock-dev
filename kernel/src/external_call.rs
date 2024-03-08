@@ -88,6 +88,22 @@ impl ExternalCall {
         }
     }
 
+    pub fn unpack_syscall(&self, syscall_bytes: [u8; 4]) -> Syscall {
+        let driver_number = (syscall_bytes[0] as usize) << 24;
+        let subdriver_number = (syscall_bytes[1] as usize) << 16;
+        let arg0 = (syscall_bytes[2] as usize) << 8;
+        let arg1 = syscall_bytes[3] as usize;
+
+        let syscall = Syscall::Command {
+            driver_number,
+            subdriver_number,
+            arg0,
+            arg1,
+        };
+
+        return syscall;
+    }
+
     /// Services and clears the next pending `DeferredCall`, returns which index
     /// was serviced
     pub fn service_next_pending<KR: KernelResources<C>, C: Chip>(&self, resources: &KR) {
