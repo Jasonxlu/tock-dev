@@ -400,9 +400,6 @@ impl Kernel {
                     // interrupts and is how code in the chips/ and capsules
                     // crates is able to execute.
                     scheduler.execute_kernel_work(chip);
-                    // PUT EXECUTION CODE HERE
-                    while ExternalCall::has_tasks() && !chip.has_pending_interrupts() {
-                        resources.external_call().service_pending(resources);
                     }
                 }
                 false => {
@@ -1351,6 +1348,7 @@ impl Kernel {
                         debug_assert!(false, "Kernel system call handling invariant violated!");
                     },
                 })
+                }
             }
             Syscall::Exit {
                 which,

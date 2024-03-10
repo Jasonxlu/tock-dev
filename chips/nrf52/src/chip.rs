@@ -39,6 +39,7 @@ pub struct Nrf52DefaultPeripherals<'a> {
     pub timer1: crate::timer::TimerAlarm<'a>,
     pub timer2: crate::timer::Timer,
     pub uarte0: crate::uart::Uarte<'a>,
+    pub uarte1: crate::uart::Uarte<'a>,
     pub spim0: crate::spi::SPIM<'a>,
     pub twi0: crate::i2c::TWI<'a>,
     pub spim1: crate::spi::SPIM<'a>,
@@ -64,6 +65,7 @@ impl<'a> Nrf52DefaultPeripherals<'a> {
             timer1: crate::timer::TimerAlarm::new(1),
             timer2: crate::timer::Timer::new(2),
             uarte0: crate::uart::Uarte::new(crate::uart::UARTE0_BASE),
+            uarte1: crate::uart::Uarte::new(crate::uart::UARTE1_BASE),
             spim0: crate::spi::SPIM::new(0),
             twi0: crate::i2c::TWI::new_twi0(),
             spim1: crate::spi::SPIM::new(1),
@@ -98,6 +100,7 @@ impl<'a> kernel::platform::chip::InterruptService for Nrf52DefaultPeripherals<'a
             crate::peripheral_interrupts::TIMER1 => self.timer1.handle_interrupt(),
             crate::peripheral_interrupts::TIMER2 => self.timer2.handle_interrupt(),
             crate::peripheral_interrupts::UART0 => self.uarte0.handle_interrupt(),
+            crate::peripheral_interrupts::UART1 => self.uarte1.handle_interrupt(),
             crate::peripheral_interrupts::SPI0_TWI0 => {
                 // SPI0 and TWI0 share interrupts.
                 // Dispatch the correct handler.

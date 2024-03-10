@@ -52,7 +52,8 @@ pub trait Scheduler<C: Chip> {
         chip.service_pending_interrupts();
         while DeferredCall::has_tasks() && !chip.has_pending_interrupts() {
             DeferredCall::service_next_pending();
-        }
+      }
+        // todo: maybe handle external syscalls here (deprecated?)
         // Execute work from external driver
     }
 

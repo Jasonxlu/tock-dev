@@ -5,6 +5,7 @@
 pub const POWER_CLOCK: u32 = 0;
 pub const RADIO: u32 = 1;
 pub const UART0: u32 = 2;
+pub const UART1: u32 = 40;
 pub const SPI0_TWI0: u32 = 3;
 pub const SPI1_TWI1: u32 = 4;
 #[cfg(feature = "nrf52")]

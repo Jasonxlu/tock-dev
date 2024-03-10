@@ -28,6 +28,9 @@ static mut BYTE: u8 = 0;
 pub const UARTE0_BASE: StaticRef<UarteRegisters> =
     unsafe { StaticRef::new(0x40002000 as *const UarteRegisters) };
 
+pub const UARTE1_BASE: StaticRef<UarteRegisters> =
+    unsafe { StaticRef::new(0x40028000 as *const UarteRegisters) };
+
 #[repr(C)]
 pub struct UarteRegisters {
     task_startrx: WriteOnly<u32, Task::Register>,

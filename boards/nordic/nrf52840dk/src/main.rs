@@ -74,6 +74,7 @@
 #![deny(missing_docs)]
 
 use capsules_core::virtualizers::virtual_alarm::VirtualMuxAlarm;
+use capsules_core::virtualizers::virtual_uart::{MuxUart, UartDevice};
 use capsules_extra::net::ieee802154::MacAddress;
 use capsules_extra::net::ipv6::ip_utils::IPAddr;
 use kernel::component::Component;
@@ -81,6 +82,8 @@ use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
 #[allow(unused_imports)]
 use kernel::hil::usb::Client;
+use kernel::hil::uart::Receive;
+use kernel::hil::uart::Transmit;
 use kernel::platform::{KernelResources, SyscallDriverLookup};
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
@@ -109,6 +112,12 @@ const UART_RTS: Option<Pin> = Some(Pin::P0_05);
 const UART_TXD: Pin = Pin::P0_06;
 const UART_CTS: Option<Pin> = Some(Pin::P0_07);
 const UART_RXD: Pin = Pin::P0_08;
+
+// Other UART pins
+const UART_RTS_2: Option<Pin> = Some(Pin::P1_05);
+const UART_TXD_2: Pin = Pin::P1_06;
+const UART_CTS_2: Option<Pin> = Some(Pin::P1_07);
+const UART_RXD_2: Pin = Pin::P1_08;
 
 const SPI_MOSI: Pin = Pin::P0_20;
 const SPI_MISO: Pin = Pin::P0_21;
@@ -207,8 +216,6 @@ pub struct Platform {
         kernel::hil::led::LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
         4,
     >,
-    mary: &'static capsules_core::mary::MaryDriver,
-    sys_redirect: &'static capsules_core::sys_redirect::SysRedirect,
     rng: &'static capsules_core::rng::RngDriver<'static>,
     adc: &'static capsules_core::adc::AdcDedicated<'static, nrf52840::adc::Adc<'static>>,
     temp: &'static TemperatureDriver,
@@ -237,6 +244,7 @@ pub struct Platform {
     kv_driver: &'static KVDriver,
     scheduler: &'static RoundRobinSched<'static>,
     systick: cortexm4::systick::SysTick,
+    external_driver: &'static capsules_core::external_driver::ExternalDriver,
     external_call: &'static kernel::external_call::ExternalCall,
 }
 
@@ -245,24 +253,29 @@ impl SyscallDriverLookup for Platform {
     where
         F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
     {
-        // if driver_num >> 31 == 1 {
-        //     debug!("Syscall redirect requested, {:X}", driver_num);
-        //     if self.sys_redirect.validate_sys(driver_num as usize) {
-        //         debug!("Syscall found in redirect list, {:X}", driver_num);
-        //         f(Some(self.sys_redirect))
-        //     } else {
-        //         debug!("Syscall not found in redirect list, {:X}", driver_num);
-        //         f(None)
-        //     }
-        // }
-        // else {
+        // If most significant bit is 1 (0b10000...), then we will match wtih "external" drivers
+        if (driver_num >> 31) == 1 {
+            // Check if desired driver exists in the external driver list
+            debug!("External driver requested: {:X}", driver_num);
+            // let res = self.external_driver.get_driver(driver_num as u32);
+            let res: u32 = self.external_driver.find_driver(driver_num as u32);
+            if res > 0 {
+                // Call driver w/ the driver_num
+                // f(res)
+                debug!("External driver found: {:X}", res);
+
+                // Dummy Call
+                f(Some(self.external_driver))
+            } else {
+                debug!("External driver not found: {:X}", driver_num);
+                f(None)
+            }
+        } else {
             match driver_num {
                 capsules_core::console::DRIVER_NUM => f(Some(self.console)),
                 capsules_core::gpio::DRIVER_NUM => f(Some(self.gpio)),
                 capsules_core::alarm::DRIVER_NUM => f(Some(self.alarm)),
                 capsules_core::led::DRIVER_NUM => f(Some(self.led)),
-                capsules_core::mary::DRIVER_NUM => f(Some(self.mary)),
-                capsules_core::sys_redirect::DRIVER_NUM => f(Some(self.sys_redirect)),
                 capsules_core::button::DRIVER_NUM => f(Some(self.button)),
                 capsules_core::rng::DRIVER_NUM => f(Some(self.rng)),
                 capsules_core::adc::DRIVER_NUM => f(Some(self.adc)),
@@ -272,13 +285,15 @@ impl SyscallDriverLookup for Platform {
                 capsules_extra::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
                 capsules_extra::net::udp::DRIVER_NUM => f(Some(self.udp_driver)),
                 kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
-                capsules_core::i2c_master_slave_driver::DRIVER_NUM => f(Some(self.i2c_master_slave)),
+                capsules_core::i2c_master_slave_driver::DRIVER_NUM => {
+                    f(Some(self.i2c_master_slave))
+                }
                 capsules_core::spi_controller::DRIVER_NUM => f(Some(self.spi_controller)),
                 capsules_extra::net::thread::driver::DRIVER_NUM => f(Some(self.thread_driver)),
                 capsules_extra::kv_driver::DRIVER_NUM => f(Some(self.kv_driver)),
                 _ => f(None),
             }
-        // }
+        }
     }
 }
 
@@ -494,17 +509,10 @@ pub unsafe fn main() {
         LedLow::new(&nrf52840_peripherals.gpio_port[LED4_PIN]),
     ));
 
-    //--------------------------------------------------------------------------
-    // MARY
-    //--------------------------------------------------------------------------
-
-    let mary = kernel::static_init!(capsules_core::mary::MaryDriver, capsules_core::mary::MaryDriver::new());
-
-    //--------------------------------------------------------------------------
-    // SYS_REDIRECT
-    //--------------------------------------------------------------------------
-
-    let sys_redirect = kernel::static_init!(capsules_core::sys_redirect::SysRedirect, capsules_core::sys_redirect::SysRedirect::new());
+    let external_driver = kernel::static_init!(
+        capsules_core::external_driver::ExternalDriver,
+        capsules_core::external_driver::ExternalDriver::new()
+    );
 
     //--------------------------------------------------------------------------
     // TIMER
@@ -533,6 +541,23 @@ pub unsafe fn main() {
     .finalize(nrf52_components::uart_channel_component_static!(
         nrf52840::rtc::Rtc
     ));
+
+    // initialize a new uart1_channel
+    let uart1_channel = UartChannel::Pins(UartPins::new(
+        UART_RTS_2, UART_TXD_2, UART_CTS_2, UART_RXD_2,
+    ));
+
+    let uart1_channel = nrf52_components::UartChannelComponent::new(
+        uart1_channel,
+        mux_alarm,
+        &base_peripherals.uarte1,
+    )
+    .finalize(nrf52_components::uart_channel_component_static!(
+        nrf52840::rtc::Rtc
+    ));
+
+    let uart1_mux = components::console::UartMuxComponent::new(uart1_channel, 115200)
+        .finalize(components::uart_mux_component_static!());
 
     // Tool for displaying information about processes.
     let process_printer = components::process_printer::ProcessPrinterTextComponent::new()
@@ -924,10 +949,24 @@ pub unsafe fn main() {
     let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
         .finalize(components::round_robin_component_static!(NUM_PROCS));
 
+    // create tx_buffer + rx_buffer + uartdevice
+
+    let tx_buffer = static_init!([u8; 20], [0; 20]);
+    let rx_buffer = static_init!([u8; 20], [0; 20]);
+    let device = static_init!(UartDevice<'static>, UartDevice::new(uart1_mux, true));
+    device.setup();
+
+    // initialize external_call
     let external_call = kernel::static_init!(
         kernel::external_call::ExternalCall,
-        kernel::external_call::ExternalCall::new(board_kernel)
+        kernel::external_call::ExternalCall::new(board_kernel, device, tx_buffer, rx_buffer)
     );
+
+    device.set_transmit_client(external_call);
+    device.set_receive_client(external_call);
+
+    // external_call.start_transmission();
+    external_call.receive();
 
     let platform = Platform {
         button,
@@ -935,9 +974,9 @@ pub unsafe fn main() {
         ieee802154_radio,
         pconsole,
         console,
+        external_driver,
+        external_call,
         led,
-        mary,
-        sys_redirect,
         gpio,
         rng,
         adc,
@@ -956,7 +995,6 @@ pub unsafe fn main() {
         kv_driver,
         scheduler,
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
-        external_call,
     };
 
     let _ = platform.pconsole.start();
@@ -1003,8 +1041,8 @@ pub unsafe fn main() {
         debug!("{:?}", err);
     });
 
-    // Pretends a message has arrived
-    kernel::external_call::ExternalCall::set();
+    // TODO:: Pretend a message has arrived
+    // kernel::external_call::ExternalCall::set();
 
     board_kernel.kernel_loop(&platform, chip, Some(&platform.ipc), &main_loop_capability);
 }
