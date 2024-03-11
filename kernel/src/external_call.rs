@@ -23,6 +23,7 @@ use crate::kernel::Kernel;
 
 /// This bool tracks whether there are any external calls pending for service.
 static mut JOB_PENDING: bool = false;
+static mut SEND_TRANSMIT: bool = true;
 
 pub struct ExternalCall {
     kernel: &'static Kernel,
@@ -32,6 +33,8 @@ pub struct ExternalCall {
     uart: &'static dyn uart::UartData<'static>,
     tx_buffer: TakeCell<'static, [u8]>,
     rx_buffer: TakeCell<'static, [u8]>,
+
+    curr_syscall: TakeCell<'static, [u8]>,
 }
 
 impl ExternalCall {
@@ -41,6 +44,7 @@ impl ExternalCall {
         uart: &'static dyn uart::UartData,
         tx_buffer: &'static mut [u8],
         rx_buffer: &'static mut [u8],
+        curr_syscall: &'static mut [u8],
     ) -> Self {
         // SAFETY: No accesses to CTR are via an &mut, and the Tock kernel is
         // single-threaded so all accesses will occur from this thread.
@@ -56,6 +60,7 @@ impl ExternalCall {
             uart: uart,
             tx_buffer: TakeCell::new(tx_buffer),
             rx_buffer: TakeCell::new(rx_buffer),
+            curr_syscall: TakeCell::new(curr_syscall),
         }
     }
 
@@ -91,28 +96,23 @@ impl ExternalCall {
     // ExternalCall.receive(&self)
     pub fn receive(&self) -> Result<(), ErrorCode> {
         debug!("Started reception");
-        let job = unsafe { JOB_PENDING };
 
-        if (job) {
-            debug!("job is occurring right now");
-            Ok(())
-        } else {
-            self.rx_buffer
-                .take()
-                .map_or(Err(ErrorCode::ALREADY), |rx_buf| {
-                    let len = rx_buf.len();
-                    let result: Result<(), (ErrorCode, &mut [u8])> =
-                        self.uart.receive_buffer(rx_buf, len);
-                    match result {
-                        Ok(()) => Ok(()),
-                        Err((code, buffer)) => {
-                            debug!("something went wrong");
-                            // self.rx_buffer.replace(buffer);
-                            Err(code)
-                        }
+        self.rx_buffer
+            .take()
+            .map_or(Err(ErrorCode::ALREADY), |rx_buf| {
+                let len = rx_buf.len();
+                let result: Result<(), (ErrorCode, &mut [u8])> =
+                    self.uart.receive_buffer(rx_buf, len);
+                debug!("inside receive");
+                match result {
+                    Ok(()) => Ok(()),
+                    Err((code, buffer)) => {
+                        debug!("something went wrong");
+                        // self.rx_buffer.replace(buffer);
+                        Err(code)
                     }
-                })
-        }
+                }
+            })
     }
 
     /// Schedule a deferred callback on the client associated with this deferred call
@@ -168,53 +168,57 @@ impl ExternalCall {
             buffer[15] = (arg1 >> 8) as u8;
             buffer[16] = arg1 as u8;
 
-            //TODO: Send the syscall using Uart
-            debug!("Sent a syscall");
-            self.start_transmission(&buffer);
+            let send_transmit = unsafe { SEND_TRANSMIT };
+
+            if send_transmit {
+                self.start_transmission(&buffer);
+            }
+
+            unsafe {
+                SEND_TRANSMIT = false;
+            }
         }
     }
 
     pub fn unpack_bytes(&self) -> Result<Syscall, ErrorCode> {
         debug!("started unpacking");
-        self.rx_buffer
-            .take()
-            .map_or(Err(ErrorCode::INVAL), |rx_buf| {
-                let mut driver_number: usize = 0;
-                for i in 1..5 {
-                    driver_number = driver_number << 8;
-                    driver_number = driver_number | rx_buf[i] as *const u8 as usize;
-                }
-                debug!("This is the driver_number {}", driver_number);
+        self.curr_syscall.map_or(Err(ErrorCode::INVAL), |rx_buf| {
+            let mut driver_number: usize = 0;
+            for i in 1..5 {
+                driver_number = driver_number << 8;
+                driver_number = driver_number | rx_buf[i] as *const u8 as usize;
+            }
+            debug!("This is the driver_number {}", driver_number);
 
-                let mut subdriver_number: usize = 0;
-                for i in 5..9 {
-                    subdriver_number = subdriver_number << 8;
-                    subdriver_number = subdriver_number | rx_buf[i] as *const u8 as usize;
-                }
-                debug!("This is the subdriver number {}", subdriver_number);
+            let mut subdriver_number: usize = 0;
+            for i in 5..9 {
+                subdriver_number = subdriver_number << 8;
+                subdriver_number = subdriver_number | rx_buf[i] as *const u8 as usize;
+            }
+            debug!("This is the subdriver number {}", subdriver_number);
 
-                let mut arg0: usize = 0;
-                for i in 9..13 {
-                    arg0 = arg0 << 8;
-                    arg0 = arg0 | rx_buf[i] as *const u8 as usize;
-                }
+            let mut arg0: usize = 0;
+            for i in 9..13 {
+                arg0 = arg0 << 8;
+                arg0 = arg0 | rx_buf[i] as *const u8 as usize;
+            }
 
-                debug!("This is the arg0 {}", arg0);
+            debug!("This is the arg0 {}", arg0);
 
-                let mut arg1: usize = 0;
-                for i in 13..17 {
-                    arg1 = arg1 << 8;
-                    arg1 = arg1 | rx_buf[i] as *const u8 as usize;
-                }
-                debug!("This is arg1 {}", arg1);
+            let mut arg1: usize = 0;
+            for i in 13..17 {
+                arg1 = arg1 << 8;
+                arg1 = arg1 | rx_buf[i] as *const u8 as usize;
+            }
+            debug!("This is arg1 {}", arg1);
 
-                Ok(Syscall::Command {
-                    driver_number,
-                    subdriver_number,
-                    arg0,
-                    arg1,
-                })
+            Ok(Syscall::Command {
+                driver_number,
+                subdriver_number,
+                arg0,
+                arg1,
             })
+        })
     }
 
     /// Services and clears the next pending `DeferredCall`, returns which index
@@ -242,7 +246,6 @@ impl ExternalCall {
         syscall: Syscall,
     ) {
         // Hook for process debugging.
-        // process.debug_syscall_called(syscall); // TODO:: << Figure out what to do about process here
 
         // Handles only the `Command` syscall
         if let Syscall::Command {
@@ -280,16 +283,11 @@ impl uart::TransmitClient for ExternalCall {
         tx_len: usize,
         rval: Result<(), ErrorCode>,
     ) {
-        debug!("Completed transmission");
+        // debug!("Completed transmission");
         self.tx_buffer.replace(buffer);
 
-        // // for pong: call self.receive()
-        debug!("Calling reception from tx callback");
+        // debug!("Calling reception from tx callback");
         let result = self.receive();
-
-        // if let Err(code) = result {
-        //     debug!("{:?}", code);
-        // }
     }
     fn transmitted_word(&self, _rval: Result<(), ErrorCode>) {}
 }
@@ -302,55 +300,38 @@ impl uart::ReceiveClient for ExternalCall {
         rcode: Result<(), ErrorCode>,
         error: uart::Error,
     ) {
-        // debug!("{}", buffer[0]);
-
-        // // Print out what was received in transmission
-        // buffer[0] += 1; // Increment the 0th value of the buffer for pong
-        //                 // self.send(buffer);
-
-        // let mut new_buffer: [u8; 17] = [0; 17];
-
-        // for (i, c) in buffer.iter().enumerate() {
-        //     new_buffer[i] = *c;
-        // }
-
-        // NEW STUFF:
-        // - Check to see if the first byte of the rx_buffer is going to be a
-        // syscall
-
         debug!("Completed reception");
         let id = buffer[0];
         debug!("{}", id);
 
-        self.rx_buffer.replace(buffer);
-
-        if id == 2 {
-            debug!("{}", id);
-        } else if id == 1 {
-            self.set();
-        }
-        // self.rx_buffer.replace(new_buffer);
-        // Copy the contents of the original buffer into the new buffer
-
-        let receive_result = self.receive();
-
-        match receive_result {
-            Ok(()) => {
-                debug!("Reception completed");
+        self.curr_syscall.map(|curr_sys| {
+            for (i, c) in buffer.iter().enumerate() {
+                if i < curr_sys.len() {
+                    curr_sys[i] = *c;
+                } else {
+                    debug!("buffer too big");
+                }
             }
-            Err(code) => {
-                debug!("{:?}", code);
-            }
-        }
+        });
 
-        // let transmission_result: Result<(), ErrorCode> = self.start_transmission(&new_buffer);
-        // if let Err(code) = transmission_result {
-        //     debug!("{:?}", code);
-        // } else {
-        //     debug!("transmit complete");
-        // }
-        // check result/error code
+        // debug!("Reception completed");
+        //     }
+        //     Ok(()),
+        //     Err(code) => {
+        //         debug!("{:?}", code);
+        //     }
     }
+
+    // let transmission_result: Result<(), ErrorCode> = self.start_transmission(&new_buffer);
+    // if let Err(code) = transmission_result {
+    //     debug!("{:?}", code);
+    // } else {
+    //     debug!("transmit complete");
+    // }
+    // check result/error code
+
+    //return result
+    //clean up
 
     fn received_word(&self, _word: u32, _rval: Result<(), ErrorCode>, _error: uart::Error) {}
 }

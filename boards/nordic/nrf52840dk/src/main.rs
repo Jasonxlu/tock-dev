@@ -80,10 +80,10 @@ use capsules_extra::net::ipv6::ip_utils::IPAddr;
 use kernel::component::Component;
 use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
-#[allow(unused_imports)]
-use kernel::hil::usb::Client;
 use kernel::hil::uart::Receive;
 use kernel::hil::uart::Transmit;
+#[allow(unused_imports)]
+use kernel::hil::usb::Client;
 use kernel::platform::{KernelResources, SyscallDriverLookup};
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
@@ -951,15 +951,22 @@ pub unsafe fn main() {
 
     // create tx_buffer + rx_buffer + uartdevice
 
-    let tx_buffer = static_init!([u8; 20], [0; 20]);
-    let rx_buffer = static_init!([u8; 20], [0; 20]);
+    let tx_buffer = static_init!([u8; 17], [0; 17]);
+    let rx_buffer = static_init!([u8; 17], [0; 17]);
+    let curr_sys_call = static_init!([u8; 17], [0; 17]);
     let device = static_init!(UartDevice<'static>, UartDevice::new(uart1_mux, true));
     device.setup();
 
     // initialize external_call
     let external_call = kernel::static_init!(
         kernel::external_call::ExternalCall,
-        kernel::external_call::ExternalCall::new(board_kernel, device, tx_buffer, rx_buffer)
+        kernel::external_call::ExternalCall::new(
+            board_kernel,
+            device,
+            tx_buffer,
+            rx_buffer,
+            curr_sys_call
+        ),
     );
 
     device.set_transmit_client(external_call);
