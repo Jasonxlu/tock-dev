@@ -5,7 +5,6 @@
 //! This module contains the implementation of the `ExternalCall` struct, which
 //! is used to handle external syscalls to other boards from the application side.
 
-use crate::debug;
 use crate::errorcode::ErrorCode;
 use crate::hil::uart;
 use crate::kernel::Kernel;
