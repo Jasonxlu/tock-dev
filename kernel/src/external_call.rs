@@ -21,7 +21,7 @@ use crate::utilities::cells::TakeCell;
 /// This bool tracks whether there are any external calls pending for service.
 static mut JOB_PENDING: bool = false;
 /// This bool tracks whether a response has been received from the other board
-/// and if we can send the next syscall
+/// and if we can send the next syscall.
 static mut SEND_TRANSMIT: bool = true;
 
 /// ExternalCall struct
@@ -62,6 +62,12 @@ impl ExternalCall {
 
     /// Start the transmission of the buffer.
     pub fn start_transmission(&self, buffer: &[u8]) -> Result<(), ErrorCode> {
+        /*
+         * Takes what was in `ExternalCall.tx_buffer` and then performs a
+         * `map_or`. If there was a value that was taken out of
+         * `ExternalCall.tx_buffer`, then send it over hardware. Otherwise, throw
+         */
+
         self.tx_buffer
             .take()
             .map_or(Err(ErrorCode::BUSY), |tx_buf| {
@@ -82,6 +88,12 @@ impl ExternalCall {
 
     /// Start the reception of the buffer.
     pub fn receive(&self) -> Result<(), ErrorCode> {
+        /*
+         * Takes what was in `ExternalCall.rx_buffer` and then performs a
+         * `map_or`. If there was a value that was taken out of
+         * `ExternalCall.rx_buffer`, then start receiving. Otherwise, throw
+         */
+
         self.rx_buffer
             .take()
             .map_or(Err(ErrorCode::ALREADY), |rx_buf| {
@@ -235,9 +247,8 @@ impl ExternalCall {
                         None => CommandReturn::failure(ErrorCode::NODEVICE),
                     };
 
-                    let _res = SyscallReturn::from_command_return(cres);
-
-                    let mut return_buffer: [u8; 17] = [0; 17];
+                    let _res = SyscallReturn::from_command_return(cres); // TODO: <<
+                    let mut return_buffer = [0; 17];
                     return_buffer[0] = 2;
 
                     let _ = self.start_transmission(&return_buffer);

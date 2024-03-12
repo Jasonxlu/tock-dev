@@ -74,7 +74,7 @@
 #![deny(missing_docs)]
 
 use capsules_core::virtualizers::virtual_alarm::VirtualMuxAlarm;
-use capsules_core::virtualizers::virtual_uart::{MuxUart, UartDevice};
+use capsules_core::virtualizers::virtual_uart::UartDevice;
 use capsules_extra::net::ieee802154::MacAddress;
 use capsules_extra::net::ipv6::ip_utils::IPAddr;
 use kernel::component::Component;
@@ -85,6 +85,7 @@ use kernel::hil::uart::Transmit;
 #[allow(unused_imports)]
 use kernel::hil::usb::Client;
 use kernel::platform::{KernelResources, SyscallDriverLookup};
+// use kernel::process::Process;
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
 use kernel::{capabilities, create_capability, debug, debug_gpio, debug_verbose, static_init};
@@ -937,14 +938,14 @@ pub unsafe fn main() {
             device,
             tx_buffer,
             rx_buffer,
-            curr_sys_call
+            curr_sys_call,
         ),
     );
 
     device.set_transmit_client(external_call);
     device.set_receive_client(external_call);
 
-    external_call.receive();
+    let _res = external_call.receive();
 
     let platform = Platform {
         button,

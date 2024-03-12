@@ -53,7 +53,6 @@ pub trait Scheduler<C: Chip> {
         while DeferredCall::has_tasks() && !chip.has_pending_interrupts() {
             DeferredCall::service_next_pending();
         }
-        // todo: maybe handle external syscalls here (deprecated?)
     }
 
     /// Ask the scheduler whether to take a break from executing userspace

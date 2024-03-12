@@ -400,10 +400,8 @@ impl Kernel {
                     // interrupts and is how code in the chips/ and capsules
                     // crates is able to execute.
                     scheduler.execute_kernel_work(chip);
-                    // TODO: move calls from scheduler to here instead
                     while ExternalCall::has_tasks() && !chip.has_pending_interrupts() {
                         resources.external_call().service_next_pending(resources);
-                        // ExternalCall::service_next_pending(resources, self);
                     }
                 }
                 false => {
@@ -861,12 +859,8 @@ impl Kernel {
                     .external_call()
                     .driver_num_is_external(driver_number)
                 {
-                    //TODO: Pack into bytes and send
                     resources.external_call().pack_syscall_and_send(syscall);
-                    //resources.external_call().handle_external_syscall(syscall);
                 } else {
-                    // TODO: HANDLE AS SRC ^^
-
                     resources
                 .syscall_driver_lookup()
                 .with_driver(driver_number, |driver| match syscall {
