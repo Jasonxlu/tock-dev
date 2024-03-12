@@ -244,7 +244,6 @@ pub struct Platform {
     kv_driver: &'static KVDriver,
     scheduler: &'static RoundRobinSched<'static>,
     systick: cortexm4::systick::SysTick,
-    external_driver: &'static capsules_core::external_driver::ExternalDriver,
     external_call: &'static kernel::external_call::ExternalCall,
 }
 
@@ -253,46 +252,25 @@ impl SyscallDriverLookup for Platform {
     where
         F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
     {
-        // If most significant bit is 1 (0b10000...), then we will match wtih "external" drivers
-        if (driver_num >> 31) == 1 {
-            // Check if desired driver exists in the external driver list
-            debug!("External driver requested: {:X}", driver_num);
-            // let res = self.external_driver.get_driver(driver_num as u32);
-            let res: u32 = self.external_driver.find_driver(driver_num as u32);
-            if res > 0 {
-                // Call driver w/ the driver_num
-                // f(res)
-                debug!("External driver found: {:X}", res);
-
-                // Dummy Call
-                f(Some(self.external_driver))
-            } else {
-                debug!("External driver not found: {:X}", driver_num);
-                f(None)
-            }
-        } else {
-            match driver_num {
-                capsules_core::console::DRIVER_NUM => f(Some(self.console)),
-                capsules_core::gpio::DRIVER_NUM => f(Some(self.gpio)),
-                capsules_core::alarm::DRIVER_NUM => f(Some(self.alarm)),
-                capsules_core::led::DRIVER_NUM => f(Some(self.led)),
-                capsules_core::button::DRIVER_NUM => f(Some(self.button)),
-                capsules_core::rng::DRIVER_NUM => f(Some(self.rng)),
-                capsules_core::adc::DRIVER_NUM => f(Some(self.adc)),
-                capsules_extra::ble_advertising_driver::DRIVER_NUM => f(Some(self.ble_radio)),
-                capsules_extra::ieee802154::DRIVER_NUM => f(Some(self.ieee802154_radio)),
-                capsules_extra::temperature::DRIVER_NUM => f(Some(self.temp)),
-                capsules_extra::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
-                capsules_extra::net::udp::DRIVER_NUM => f(Some(self.udp_driver)),
-                kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
-                capsules_core::i2c_master_slave_driver::DRIVER_NUM => {
-                    f(Some(self.i2c_master_slave))
-                }
-                capsules_core::spi_controller::DRIVER_NUM => f(Some(self.spi_controller)),
-                capsules_extra::net::thread::driver::DRIVER_NUM => f(Some(self.thread_driver)),
-                capsules_extra::kv_driver::DRIVER_NUM => f(Some(self.kv_driver)),
-                _ => f(None),
-            }
+        match driver_num {
+            capsules_core::console::DRIVER_NUM => f(Some(self.console)),
+            capsules_core::gpio::DRIVER_NUM => f(Some(self.gpio)),
+            capsules_core::alarm::DRIVER_NUM => f(Some(self.alarm)),
+            capsules_core::led::DRIVER_NUM => f(Some(self.led)),
+            capsules_core::button::DRIVER_NUM => f(Some(self.button)),
+            capsules_core::rng::DRIVER_NUM => f(Some(self.rng)),
+            capsules_core::adc::DRIVER_NUM => f(Some(self.adc)),
+            capsules_extra::ble_advertising_driver::DRIVER_NUM => f(Some(self.ble_radio)),
+            capsules_extra::ieee802154::DRIVER_NUM => f(Some(self.ieee802154_radio)),
+            capsules_extra::temperature::DRIVER_NUM => f(Some(self.temp)),
+            capsules_extra::analog_comparator::DRIVER_NUM => f(Some(self.analog_comparator)),
+            capsules_extra::net::udp::DRIVER_NUM => f(Some(self.udp_driver)),
+            kernel::ipc::DRIVER_NUM => f(Some(&self.ipc)),
+            capsules_core::i2c_master_slave_driver::DRIVER_NUM => f(Some(self.i2c_master_slave)),
+            capsules_core::spi_controller::DRIVER_NUM => f(Some(self.spi_controller)),
+            capsules_extra::net::thread::driver::DRIVER_NUM => f(Some(self.thread_driver)),
+            capsules_extra::kv_driver::DRIVER_NUM => f(Some(self.kv_driver)),
+            _ => f(None),
         }
     }
 }
@@ -508,11 +486,6 @@ pub unsafe fn main() {
         LedLow::new(&nrf52840_peripherals.gpio_port[LED3_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED4_PIN]),
     ));
-
-    let external_driver = kernel::static_init!(
-        capsules_core::external_driver::ExternalDriver,
-        capsules_core::external_driver::ExternalDriver::new()
-    );
 
     //--------------------------------------------------------------------------
     // TIMER
@@ -950,7 +923,6 @@ pub unsafe fn main() {
         .finalize(components::round_robin_component_static!(NUM_PROCS));
 
     // create tx_buffer + rx_buffer + uartdevice
-
     let tx_buffer = static_init!([u8; 17], [0; 17]);
     let rx_buffer = static_init!([u8; 17], [0; 17]);
     let curr_sys_call = static_init!([u8; 17], [0; 17]);
@@ -972,7 +944,6 @@ pub unsafe fn main() {
     device.set_transmit_client(external_call);
     device.set_receive_client(external_call);
 
-    // external_call.start_transmission();
     external_call.receive();
 
     let platform = Platform {
@@ -981,7 +952,6 @@ pub unsafe fn main() {
         ieee802154_radio,
         pconsole,
         console,
-        external_driver,
         external_call,
         led,
         gpio,
@@ -1047,9 +1017,6 @@ pub unsafe fn main() {
         debug!("Error loading processes!");
         debug!("{:?}", err);
     });
-
-    // TODO:: Pretend a message has arrived
-    // kernel::external_call::ExternalCall::set();
 
     board_kernel.kernel_loop(&platform, chip, Some(&platform.ipc), &main_loop_capability);
 }
