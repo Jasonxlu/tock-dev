@@ -11,6 +11,7 @@ use crate::kernel::Kernel;
 use crate::platform::chip::Chip;
 use crate::platform::platform::KernelResources;
 use crate::platform::platform::SyscallDriverLookup;
+#[allow(unused_imports)]
 use crate::process::{Process, ProcessId};
 use crate::syscall::Syscall;
 use crate::syscall::SyscallReturn;
@@ -33,7 +34,7 @@ pub struct ExternalCall {
     curr_syscall: TakeCell<'static, [u8]>,
 }
 
-/// Implement the ExternalCall struct
+// Implement the ExternalCall struct
 impl ExternalCall {
     /// Create a new ExternalCall object.
     pub fn new(
@@ -245,7 +246,7 @@ impl ExternalCall {
     }
 }
 
-/// Implement the TransmitClient and ReceiveClient for ExternalCall
+// Implement the TransmitClient for ExternalCall
 impl uart::TransmitClient for ExternalCall {
     fn transmitted_buffer(
         &self,
@@ -259,6 +260,7 @@ impl uart::TransmitClient for ExternalCall {
     fn transmitted_word(&self, _rval: Result<(), ErrorCode>) {}
 }
 
+// Implement the ReceiveClient for ExternalCall
 impl uart::ReceiveClient for ExternalCall {
     fn received_buffer(
         &self,
@@ -269,6 +271,14 @@ impl uart::ReceiveClient for ExternalCall {
     ) {
         let id = buffer[0];
 
+        if id == 2 {
+            unsafe {
+                SEND_TRANSMIT = true;
+            }
+        } else if id == 1 {
+            self.set();
+        }
+
         self.curr_syscall.map(|curr_sys| {
             for (i, c) in buffer.iter().enumerate() {
                 if i < curr_sys.len() {
@@ -276,6 +286,10 @@ impl uart::ReceiveClient for ExternalCall {
                 }
             }
         });
+
+        self.rx_buffer.replace(buffer);
+
+        let _receive_result = self.receive();
     }
 
     fn received_word(&self, _word: u32, _rval: Result<(), ErrorCode>, _error: uart::Error) {}
